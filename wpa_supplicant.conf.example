@@ -1,0 +1,6 @@
+country=NO
+
+network={
+    ssid="ENTER-SSID-HERE"
+    psk="ENTER-PASSWORD-HERE"
+}
