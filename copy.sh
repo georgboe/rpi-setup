@@ -11,19 +11,24 @@ fi
 
 target=${1?Please enter a target}
 
-export user="georg"
+export timezone="Europe/Oslo"
+
+USER=$(whiptail --inputbox "Enter a username" 8 78 georg --title "Admin account setup" 3>&1 1>&2 2>&3)
+export user=$USER
 
 # Read Password
-read -r -s -p "Password: " password
-echo
-export password=$password
+PASSWORD=$(whiptail --passwordbox "Please enter a password" 8 78 --title "Admin account setup" 3>&1 1>&2 2>&3)
+export password=$PASSWORD
 
-wget --quiet -nc -O  - https://downloads.raspberrypi.org/raspbian_lite_latest | gunzip | pv | dd of="$target" bs=4M conv=fsync
+(pv -n 2019-06-20-raspbian-buster-lite.img | dd of="$target" bs=4M conv=fsync) 2>&1 | whiptail --gauge "Copying image to $target" 8 78 0
 
 blockdev --rereadpt "$target"
 
 # Enable SSH
 mount "${target}1" /mnt
+# echo " cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory" >> /mnt/cmdline.txt
+
+echo "temp_soft_limit=70" >> /mnt/config.txt
 touch /mnt/ssh
 umount /mnt
 
@@ -38,23 +43,34 @@ cat wpa_supplicant.conf >> /mnt/etc/wpa_supplicant/wpa_supplicant.conf
 
 # Setup user
 
-cat << EOF | systemd-nspawn -D /mnt bin/bash
-useradd -G sudo -m --shell /bin/bash "$user"
+cat << EOF | systemd-nspawn --pipe -D /mnt bin/bash
+useradd -G sudo,video -m --shell /bin/bash "$user"
 echo -e "$password\\n$password\\n" | passwd "$user"
 
 apt update
-yes | apt upgrade
 
-cd "/home/$user"
-curl -Lo log2ram.tar.gz https://github.com/azlux/log2ram/archive/master.tar.gz
-tar xf log2ram.tar.gz
-cd log2ram-master
-chmod +x install.sh && sudo ./install.sh
-mv /etc/cron.hourly/log2ram /etc/cron.daily/log2ram
-cd ..
-rm -rf log2ram-master log2ram.tar.gz
+echo unattended-upgrades "unattended-upgrades/enable_auto_updates" boolean true | debconf-set-selections
+echo unattended-upgrades "unattended-upgrades/origins_pattern" string "origin=Debian,codename=${distro_codename},label=Debian-Security" | debconf-set-selections
+apt install -y unattended-upgrades 
+
+rm /etc/localtime
+echo "$timezone" > /etc/timezone
+dpkg-reconfigure -f noninteractive tzdata
+
+echo "tmpfs /var/log tmpfs defaults,noatime,mode=0755,size=40M 0 0" >> /etc/fstab
+
+cp /usr/share/systemd/tmp.mount /etc/systemd/system/
+systemctl enable tmp.mount
+
+# dphys-swapfile swapoff
+# dphys-swapfile uninstall
+# systemctl stop dphys-swapfile
+# systemctl disable dphys-swapfile
 
 userdel -r pi
+
+apt install -y vim rng-tools
+echo "HRNGDEVICE=/dev/hwrng" >> /etc/default/rng-tools
 
 EOF
 
